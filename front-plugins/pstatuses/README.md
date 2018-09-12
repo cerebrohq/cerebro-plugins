@@ -11,6 +11,7 @@ If all is OK, Linked task status will be automatically changed to 'render_status
 Example tasks structure:
 
 Root task-> Render Parent -> Render Task 1
+
 Root task-> Compose Parent -> Compose Task 1
 
 Link: Render Task 1 -> Compose Task 1
