@@ -15,9 +15,9 @@ Root task
 	-> Render Parent
 		|
 		-> Render Task 1	--->
-	|							|
-	-> Compose Parent			|	Link
-		|						|
-		-> Compose Task 1	<---
+	|				   |
+	-> Compose Parent		   | Link
+	|				   |
+	-> Compose Task 1		<---
 		
 If 'Compose Task 1' status will be changed to 'paused', 'Render Task 1' status will be automatically chaned to 'could be better'
