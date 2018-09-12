@@ -23,6 +23,7 @@ import os
 import traceback
 import zipfile
 import tempfile
+import re
 
 def formatException(e):
 	exception_list = traceback.format_stack()
@@ -89,6 +90,25 @@ def correctFileName(fname):
 	.replace("`", "") \
 	.replace(" ", "_");
 
+def splitEmailAddr(mailTo, bcc):
+	to_list = re.split(';|,|\n|\r|\s', mailTo)
+
+	uniqMail = set();
+	for a in to_list:
+		if a and len(a) > 0:
+			uniqMail.add(a);
+
+	for a in bcc:
+		uniqMail.add(a);
+
+	toAddrs = list();
+	for a in uniqMail:
+		a = a.strip();
+		if a and len(a) > 0:
+			toAddrs.append(a);
+
+	return toAddrs;
+
 
 def email(smtpOptions,  emailAddr, text, subj, attachments=list(), bcc=list()):
 	# <smtpOptions> must be a dictianry.
@@ -98,6 +118,8 @@ def email(smtpOptions,  emailAddr, text, subj, attachments=list(), bcc=list()):
 	#	* from - sender mail address.
 	#		default: to "Cerebro Mail Service <no-reply@cerebrohq.com>"
 	#	* ssl - use SSL.
+	#		default: False
+	#	* tls - start TLS
 	#		default: False
 	#	* login - user name to login on SMTP
 	#		default: None
@@ -110,7 +132,7 @@ def email(smtpOptions,  emailAddr, text, subj, attachments=list(), bcc=list()):
 	#	* debugEmail - override mail adress
 	#
 	#   * To - set To header
-    #   * Cc - set Cc header
+	#   * Cc - set Cc header
 	#
 	#   * zipFile - compress all atachments in zip and attach it
 	#
@@ -128,32 +150,7 @@ def email(smtpOptions,  emailAddr, text, subj, attachments=list(), bcc=list()):
 		print('email adress overriden {0} -> {1}'.format(emailAddr,  smtpOptions['debugEmail']));
 
 	else:
-		uniqMail = set();
-		multuAddr = True;
-
-		if ',' in mailTo:
-			to_list = mailTo.split(',')
-		elif ';' in mailTo:
-			to_list = mailTo.split(';')
-		else:
-			multuAddr = False;
-			to_list = mailTo;
-
-		if multuAddr:
-			for a in to_list:
-				uniqMail.add(a);
-		else:
-			uniqMail.add(to_list);
-
-		for a in bcc:
-			uniqMail.add(a);
-
-		toAddrs = list();
-		for a in uniqMail:
-			a = a.strip();
-			if a and len(a) > 0:
-				toAddrs.append(a);
-
+		toAddrs = splitEmailAddr(mailTo, bcc);
 		#print('emailAddr ', emailAddr);
 		#print('toaddr ', toAddrs);
 		#print('uniqMail ', uniqMail);
@@ -273,4 +270,27 @@ def has_flag(flags, flag):
 	"""
 	return ((flags & (1 << flag))!=0)
 
+def smtpOptions(cron_conf):
+	ret = {
+		'addr' : cron_conf.MAIL_SMTP
+		, 'ssl' : False
+		, 'log' : cron_conf.DEBUG
+		, 'from' : cron_conf.MAIL_FROM
+	};
 
+	if 'smtp_port' in cron_conf.OPTS:
+		ret['port'] = cron_conf.OPTS['smtp_port'];
+
+	if 'smtp_tls' in cron_conf.OPTS:
+		ret['tls'] = cron_conf.OPTS['smtp_tls'];
+
+	if len(cron_conf.MAIL_LOGIN)>0:
+		ret['login'] = cron_conf.MAIL_LOGIN;
+
+	if len(cron_conf.MAIL_PSSWD)>0:
+		ret['psswd'] = cron_conf.MAIL_PSSWD;
+
+	if cron_conf.DEBUG:
+		ret['debugEmail'] = cron_conf.MAIL_ADMIN;
+
+	return ret;

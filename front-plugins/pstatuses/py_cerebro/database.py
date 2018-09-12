@@ -182,8 +182,7 @@ class Database():
 		self.db_timeout = db_timeout
 		self.db_reconn_count = db_reconn_count
 		self.disconnected_by_timer = False
-		self.is_connected_by_client = False
-		self.dont_auto_disconnect = False
+		self.is_connected_by_client = False		
 
 		self.dbcon = None
 		self.db = None
@@ -192,16 +191,9 @@ class Database():
 		psycopg2.extensions.register_adapter(set, Set_to_sql_arr)
 
 	def __del__(self):
-		if self.db != None and self.db.closed == False:
-			self.db.close()
-		
-		if self.dbcon != None and self.dbcon.closed == False:		
-			self.dbcon.close()
+		self.__disconnectDB()	
 
 	def __disconnectDB(self):
-		if self.dont_auto_disconnect:
-			return
-
 		if self.db != None and self.db.closed == False:
 			self.db.close()
 		
@@ -210,10 +202,22 @@ class Database():
 
 		self.disconnected_by_timer = True
 
+	def __reconnectDB(self):		
+		self.__disconnectDB()
+		if self.is_connected_by_client:
+			err = self.connect_from_cerebro_client()
+			if err != 0:
+				raise Exception('Connection Error')
+		else:
+			self.connect(self.db_user, self.db_password)
+
+		self.disconnectTask.cancel()
+
 	def connect(self, db_user, db_password):
 		"""
 		Connection and authentification.
 		"""
+		self.disconnected_by_timer = False
 		self.is_connected_by_client = False
 		self.db_user = db_user
 		self.db_password = db_password
@@ -224,6 +228,7 @@ class Database():
 		User authentication will be after connection.
 		"""
 
+		self.dbcon.set_client_encoding('UTF8')
 		self.dbcon.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT) # Automatic transaction commit
 		self.db = self.dbcon.cursor()
 		self.db.execute('select "webStart"(%s, %s)', (db_user, db_password))
@@ -243,10 +248,11 @@ class Database():
 		concurrent Cerebro client connection (if connected with the same credentials) this function will
 		leave the Cerebro client connection alive.
 		
-		:returns: connection status:
-		| 0 - connection established;
-		| 1 - connection not established (Cerebro client application is running, but user is not logged in);
-		| 2 - connection not established (Cerebro client application is not running).
+		:returns:
+		    connection status:
+			* 0 - connection established;
+			* 1 - connection not established (Cerebro client application is running, but user is not logged in);
+			* 2 - connection not established (Cerebro client application is not running).
 		
 		::
 		
@@ -258,12 +264,12 @@ class Database():
 		.. seealso:: :py:meth:`connect() <py_cerebro.database.Database.connect>`.
 		"""
 		status = 2
-		self.is_connected_by_client = True
+		self.disconnected_by_timer = False		
 		try:
 			cerebro_port = 51051
 			conn = socket.create_connection(('127.0.0.1',  cerebro_port),)
 
-			proto_version =2
+			proto_version = 3
 			packet_type = 5
 
 			msg = struct.pack('II',  proto_version,  packet_type)
@@ -272,7 +278,7 @@ class Database():
 			conn.send(header+msg)
 			data = conn.recv(1024)
 
-			res = struct.unpack('IIQ',  data)
+			res = struct.unpack_from('IIQ',  data, 0)
 			if res[0] == 0xEEEEFF01:
 				session_id = res[2]
 				if session_id == 0:
@@ -283,6 +289,8 @@ class Database():
 					self.dbcon.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT) # Выставляем автоматический комит транзакций
 					self.db = self.dbcon.cursor()
 					self.sid = session_id # устанавливаем идентификатор авторизованного пользователя.
+
+					self.is_connected_by_client = True
 
 					self.disconnectTask = threading.Timer(self.db_timeout, self.__disconnectDB)
 					self.disconnectTask.start()
@@ -302,47 +310,56 @@ class Database():
 		Executes the query and returns the result. The result has a form of a table (list pf tuples).
 		"""
 
-		if self.disconnected_by_timer:
-			if self.is_connected_by_client:
-				self.connect_from_cerebro_client()
-			else:
-				self.connect(self.db_user, self.db_password)
-			self.disconnected_by_timer = False
-
+		if self.disconnected_by_timer or self.db == None or self.db.closed:
+			self.__reconnectDB()
+		else:	
+			self.disconnectTask.cancel()
+		
 		try:
 			pars = (self.sid,) + parameters
 			self.db.execute('select "webResume2"(%s);' + query,  pars)
 		except psycopg2.Error as err:
 			if err.pgcode in {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'} or \
-		    err.pgerror == 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
-				self.dont_auto_disconnect = True
+			err.pgerror == 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
 				showError = True
 				for x in range(0, self.db_reconn_count):
 					try:
-						if self.is_connected_by_client:
-							self.connect_from_cerebro_client()
-						else:
-							self.connect(self.db_user, self.db_password)
+						self.__reconnectDB()						
+
 						pars = (self.sid,) + parameters
 						self.db.execute('select "webResume2"(%s);' + query,  pars)
 						showError = False
 						break
 					except Exception as err:
-						print('Reconnection attempt: ' + str(x + 1))
-						time.sleep(5)
-				self.dont_auto_disconnect = False
+						if err.pgcode not in {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'} and \
+						err.pgerror != 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
+							raise
+						time.sleep(5)						
+									
 				if showError:
-					raise Exception('Reconnection Error!')
-						
+					raise Exception('Connection Error')
 			else:
-				print(err)
+				raise			
 
-		self.disconnectTask.cancel()
+		table = None
+		try:
+			table = self.db.fetchall()
+		except psycopg2.Error as err:
+			if str(err) == 'cursor already closed':					
+				print('cursor already closed')
+				self.__reconnectDB()						
+
+				self.db.execute('select "webResume2"(%s);' + query,  pars)
+				table = self.db.fetchall()					
+			else:
+				raise
+		
+		#print(table)
 
 		self.disconnectTask = threading.Timer(self.db_timeout, self.__disconnectDB)
 		self.disconnectTask.start()
 
-		return self.db.fetchall()	
+		return table
 	
 	def current_user_id(self):
 		"""
@@ -443,6 +460,7 @@ class Database():
 		'test_task02', 'test_task03', ... - names of new tasks.
 
 		::
+
 			# Копируем в задачу 0 задачи 1(2 копии), 2 и 3
 			to_do_task_list = db.to_do_task_list(db.current_user_id(),  True)
 			lst_copy = [(to_do_task_list[1][dbtypes.TASK_DATA_ID], 'Копия задачи 1(1)'), 
@@ -819,7 +837,9 @@ class Database():
 			db.task_set_start({task_id, task_id1}, 4506.375) # starting point is May 03, 2012 9:00am UTC
 		
 		An example of setting the starting time equal to current time
+
 		::
+
 			import datetime
 
 			datetime_now = datetime.datetime.utcnow()
@@ -964,7 +984,7 @@ class Database():
 			print('Хэштеги задачи ',  hashtags) # распечатываем хэштеги
 
 		"""
-		hashtags = '' #self.execute('select "htSetTask"(%s,%s,%s)', get_val_by_type(task_id), hashtags, True)
+		hashtags = self.execute('select "htTask"(%s)', task_id) #self.execute('select "htSetTask"(%s,%s,%s)', get_val_by_type(task_id), hashtags, True)
 
 		return hashtags
 
@@ -1009,9 +1029,33 @@ class Database():
 
 		Gets the message hashtags.
 		"""
-		hashtags = ''#self.execute('select "htSetEvent"(%s,%s,%s)', get_val_by_type(message_id), hashtags, True)
+		#hashtags = self.execute('select "htAggregateEvent"(%s)', message_id)
+		msg = self.execute('select * from "eventQuery_11"(%s)',  {message_id, })[0]
+		htgs = msg[17]
 
-		return hashtags
+		retVal = []
+		
+		if htgs:
+			universes = self.execute('select uid from "uniUserList_00"(%s)', (self.current_user_id(),))
+
+			all_htgs = []
+			for universe in universes:
+				unid = universe[0]
+				un_htgs = self.execute('select uid, name from "htSchemaList"(%s)', unid)
+				all_htgs.extend(un_htgs)
+
+			htgs = htgs.split(' ')
+
+			for ht in htgs:
+				ht = ht.split(':')[1]
+				ht = int(ht, 16)
+
+				for all_ht in all_htgs:
+					if all_ht[0] == ht:
+						retVal.append(all_ht[1])
+						break
+
+		return retVal
 
 	def message_remove_hashtags(self, message_id, hashtags):
 		"""
@@ -1058,9 +1102,35 @@ class Database():
 
 		.. note:: Recommended for attachments with tag ATTACHMENT_DATA_TAG value: ATTACHMENT_TAG_FILE or ATTACHMENT_TAG_LINK.
 		"""
-		hashtags = ''#self.execute('select "htSetAttachment"(%s,%s,%s)', get_val_by_type(attachment_id), hashtags, True)
+		#hashtags = ''#self.execute('select "htSetAttachment"(%s,%s,%s)', get_val_by_type(attachment_id), hashtags, True)
 
-		return hashtags
+		#return hashtags
+		attach = self.execute('select * from "attachQuery_01"(%s)',  {attachment_id, })[0]
+		htgs = attach[11]
+
+		retVal = []
+		
+		if htgs:
+			universes = self.execute('select uid from "uniUserList_00"(%s)', (self.current_user_id(),))
+
+			all_htgs = []
+			for universe in universes:
+				unid = universe[0]
+				un_htgs = self.execute('select uid, name from "htSchemaList"(%s)', unid)
+				all_htgs.extend(un_htgs)
+
+			htgs = htgs.split(' ')
+
+			for ht in htgs:
+				ht = ht.split(':')[1]
+				ht = int(ht, 16)
+
+				for all_ht in all_htgs:
+					if all_ht[0] == ht:
+						retVal.append(all_ht[1])
+						break
+
+		return retVal
 
 	def attachment_remove_hashtags(self, attachment_id, hashtags):
 		"""
@@ -1262,8 +1332,10 @@ class Database():
 		"""		
 		
 		hash = ''
-		if as_link != True and carga: 	# If the file is attached physically, adding it to Cargador and getting its hash
-			
+		if as_link != True: 	# If the file is attached physically, adding it to Cargador and getting its hash
+			if (carga) is None:
+				raise Exception('Подключение к хранилищу отсутствует')
+
 			# Query to get text locator of the task
 			rtask_url = self.execute('select "getUrlBody_byTaskId_00"((select taskid from "eventQuery_08"(%s)))', {message_id, })
 			task_url = rtask_url[0][0]								
@@ -1280,7 +1352,7 @@ class Database():
 		file_name = ''
 		if as_link == True:
 			tag = ATTACHMENT_TAG_LINK
-			file_name = filename
+			file_name = filename.replace('\\', '/')
 		else:			
 			file_size = os.stat(filename).st_size
 			file_name = os.path.basename(filename)
@@ -1311,28 +1383,31 @@ class Database():
 		you have to get a separate new ID for each file.
 		"""
 		
-		if thumbnails != None and len(thumbnails) > 0 and carga:		
-			# Adding thumbnails to the file storage and getting their hash sums
-			hashthumbs = list()
-			for f in thumbnails:
-				th_hash64 = carga.import_file(f,  'thumbnail.cache') # Importing a thumbnail to the file storage
-				th_hash = hash64_16(th_hash64)
-				hashthumbs.append(th_hash)		
+		if (carga) is None:
+			print('Подключение к хранилищу отсутствует')
+		else:
+			if thumbnails != None and len(thumbnails) > 0 :		
+				# Adding thumbnails to the file storage and getting their hash sums
+				hashthumbs = list()
+				for f in thumbnails:
+					th_hash64 = carga.import_file(f,  'thumbnail.cache') # Importing a thumbnail to the file storage
+					th_hash = hash64_16(th_hash64)
+					hashthumbs.append(th_hash)		
 
-			# Adding thumbnail hash sums to the database
-			for i in range(len(hashthumbs)):
+				# Adding thumbnail hash sums to the database
+				for i in range(len(hashthumbs)):
 				
-				if i > 2:
-					break
+					if i > 2:
+						break
 				
-				tag = i+1 # Setting a tag for the thumbnail. 1 - first frame, 2 - middle frame, 3 - last frame
+					tag = i+1 # Setting a tag for the thumbnail. 1 - first frame, 2 - middle frame, 3 - last frame
 
-				# Adding thumbnail entry
-				self.execute('select "newAtachment_00_"(%s::bigint, %s::integer, %s, %s::integer, %s::bigint, %s, %s)',
-						message_id, new_attach_id, hashthumbs[i], tag, 0, '', '') # Executing entry adding query
-				"""
-					Such parameters as file size, file name and text comments make no sense, therefore the corresponding fields are empty
-				"""
+					# Adding thumbnail entry
+					self.execute('select "newAtachment_00_"(%s::bigint, %s::integer, %s, %s::integer, %s::bigint, %s, %s)',
+							message_id, new_attach_id, hashthumbs[i], tag, 0, '', '') # Executing entry adding query
+					"""
+						Such parameters as file size, file name and text comments make no sense, therefore the corresponding fields are empty
+					"""
 				
 		return new_attach_id
 	

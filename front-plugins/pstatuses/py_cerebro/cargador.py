@@ -64,11 +64,16 @@ class Cargador(xmlrpc.client.ServerProxy):
 			c_url = c_url.rstrip('/')
 
 		c_url = c_url + '/' + os.path.basename(file_name)
-
+		
+		host = '{0}:{1}'.format(self.host, self.http_port)
+		content_lenght = '{0}'.format(os.stat(file_name).st_size)
 		headers = {
 			"User-Agent": "Python uploader",
 			"Content-type": "application/octet-stream",
-			"Accept": "text/plain"}
+			"Accept": "text/plain",
+			"host": host,
+			"accept-encoding": "gzip, deflate",
+			"content-length": content_lenght}
 
 		f = open(file_name, "rb")
 
