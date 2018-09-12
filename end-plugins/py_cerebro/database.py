@@ -182,8 +182,7 @@ class Database():
 		self.db_timeout = db_timeout
 		self.db_reconn_count = db_reconn_count
 		self.disconnected_by_timer = False
-		self.is_connected_by_client = False
-		self.dont_auto_disconnect = False
+		self.is_connected_by_client = False		
 
 		self.dbcon = None
 		self.db = None
@@ -192,16 +191,9 @@ class Database():
 		psycopg2.extensions.register_adapter(set, Set_to_sql_arr)
 
 	def __del__(self):
-		if self.db != None and self.db.closed == False:
-			self.db.close()
-		
-		if self.dbcon != None and self.dbcon.closed == False:		
-			self.dbcon.close()
+		self.__disconnectDB()	
 
 	def __disconnectDB(self):
-		if self.dont_auto_disconnect:
-			return
-
 		if self.db != None and self.db.closed == False:
 			self.db.close()
 		
@@ -210,10 +202,22 @@ class Database():
 
 		self.disconnected_by_timer = True
 
+	def __reconnectDB(self):		
+		self.__disconnectDB()
+		if self.is_connected_by_client:
+			err = self.connect_from_cerebro_client()
+			if err != 0:
+				raise Exception('Connection Error')
+		else:
+			self.connect(self.db_user, self.db_password)
+
+		self.disconnectTask.cancel()
+
 	def connect(self, db_user, db_password):
 		"""
 		Connection and authentification.
 		"""
+		self.disconnected_by_timer = False
 		self.is_connected_by_client = False
 		self.db_user = db_user
 		self.db_password = db_password
@@ -260,7 +264,7 @@ class Database():
 		.. seealso:: :py:meth:`connect() <py_cerebro.database.Database.connect>`.
 		"""
 		status = 2
-		self.is_connected_by_client = True
+		self.disconnected_by_timer = False		
 		try:
 			cerebro_port = 51051
 			conn = socket.create_connection(('127.0.0.1',  cerebro_port),)
@@ -286,6 +290,8 @@ class Database():
 					self.db = self.dbcon.cursor()
 					self.sid = session_id # устанавливаем идентификатор авторизованного пользователя.
 
+					self.is_connected_by_client = True
+
 					self.disconnectTask = threading.Timer(self.db_timeout, self.__disconnectDB)
 					self.disconnectTask.start()
 			
@@ -304,47 +310,56 @@ class Database():
 		Executes the query and returns the result. The result has a form of a table (list pf tuples).
 		"""
 
-		if self.disconnected_by_timer or self.db.closed:
-			if self.is_connected_by_client:
-				self.connect_from_cerebro_client()
-			else:
-				self.connect(self.db_user, self.db_password)
-			self.disconnected_by_timer = False
-
+		if self.disconnected_by_timer or self.db == None or self.db.closed:
+			self.__reconnectDB()
+		else:	
+			self.disconnectTask.cancel()
+		
 		try:
 			pars = (self.sid,) + parameters
 			self.db.execute('select "webResume2"(%s);' + query,  pars)
 		except psycopg2.Error as err:
 			if err.pgcode in {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'} or \
-		    err.pgerror == 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
-				self.dont_auto_disconnect = True
+			err.pgerror == 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
 				showError = True
 				for x in range(0, self.db_reconn_count):
 					try:
-						if self.is_connected_by_client:
-							self.connect_from_cerebro_client()
-						else:
-							self.connect(self.db_user, self.db_password)
+						self.__reconnectDB()						
+
 						pars = (self.sid,) + parameters
 						self.db.execute('select "webResume2"(%s);' + query,  pars)
 						showError = False
 						break
 					except Exception as err:
-						print('Reconnection attempt: ' + str(x + 1))
-						time.sleep(5)
-				self.dont_auto_disconnect = False
+						if err.pgcode not in {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'} and \
+						err.pgerror != 'server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\n':
+							raise
+						time.sleep(5)						
+									
 				if showError:
-					raise Exception('Reconnection Error!')
-						
+					raise Exception('Connection Error')
 			else:
-				print(err)
+				raise			
 
-		self.disconnectTask.cancel()
+		table = None
+		try:
+			table = self.db.fetchall()
+		except psycopg2.Error as err:
+			if str(err) == 'cursor already closed':					
+				print('cursor already closed')
+				self.__reconnectDB()						
+
+				self.db.execute('select "webResume2"(%s);' + query,  pars)
+				table = self.db.fetchall()					
+			else:
+				raise
+		
+		#print(table)
 
 		self.disconnectTask = threading.Timer(self.db_timeout, self.__disconnectDB)
 		self.disconnectTask.start()
 
-		return self.db.fetchall()	
+		return table
 	
 	def current_user_id(self):
 		"""
