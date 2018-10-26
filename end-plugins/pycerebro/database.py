@@ -145,7 +145,7 @@ class Database():
 	* :py:meth:`users()                          <py_cerebro.database.Database.users>`
 	"""
 
-	def __init__(self, db_host, db_port, db_timeout = 10, db_reconn_count = 3):
+	def __init__(self, db_host = '', db_port = None, db_timeout = 10, db_reconn_count = 3):
 		"""
 		:param string db_host: host name.
 		:param int db_port: port.
@@ -204,7 +204,7 @@ class Database():
 		payload = {
 			'method': 'sessionDirectStart' if direct_connection else 'sessionStart',
 			'jsonrpc': '2.0',
-			'params': [self.db_user, self.db_password, 655360],
+			'params': [self.db_user, self.db_password, 0],
 			'id': self.query_id
 		}
 
