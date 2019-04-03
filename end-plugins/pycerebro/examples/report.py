@@ -202,3 +202,5 @@ def make_thumnails(filename):
 	"""
 	
 	return thumbnails
+
+add_report_to_task('/pchelin_test/New task/Новая задача 3йё', 'user', 'password', 'Example report', 0, 'D:/Work/tmp/стойка/test.png', False)

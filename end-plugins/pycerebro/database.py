@@ -179,8 +179,8 @@ class Database():
 
 		self.sid = -1
 		self.query_id = 1
-		self.db_url_primary = None
-		self.db_url_secondary = None
+		self.db_url_primary = ''
+		self.db_url_secondary = ''
 		
 	def connect(self, db_user, db_password, primary_url='', secondary_url=''):
 		"""
@@ -196,6 +196,13 @@ class Database():
 		self.db_user = db_user
 		self.db_password = db_password
 
+		# Check url format
+		self.db_url_primary = "{0}{1}{2}".format("" if primary_url.startswith("http") else "http://", primary_url, "" if primary_url.endswith(".php") else "/rpc.php")
+		if secondary_url is not None and len(secondary_url) != 0:
+			self.db_url_secondary = "{0}{1}{2}".format("" if secondary_url.startswith("http") else "http://", secondary_url, "" if secondary_url.endswith(".php") else "/rpc.php")
+		else:
+			self.db_url_secondary = self.db_url_primary
+
 		header = {
 			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
 			'Accept': 'application/json-rpc',
@@ -208,14 +215,11 @@ class Database():
 			'id': self.query_id
 		}
 
-		# Check url format
-		connect_url = "{0}{1}{2}".format("" if primary_url.startswith("http") else "http://", primary_url, "" if primary_url.endswith(".php") else "/rpc.php")
-
 		res = None
 		error_msg = ""
 		for i in range(self.db_reconn_count):
 			try:
-				response = requests.post(connect_url, headers=header, data=json.dumps(payload, default=json_serial), timeout=30)
+				response = requests.post(self.db_url_primary, headers=header, data=json.dumps(payload, default=json_serial), timeout=30)
 				self.query_id += 1
 				if response.status_code == 200:
 					res = json.loads(response.text)
@@ -235,10 +239,7 @@ class Database():
 				raise Exception('Login is invalid')
 
 			self.sid = int(res["result"][0]["token"])
-			#self.db_url_primary = res["result"][len(res["result"]) - 1]["server"]["instances"][0]["addr_jrpc"] + u"/rpc.php"
-			if direct_connection:
-				self.db_url_primary = self.db_url_secondary = connect_url
-			else:
+			if not direct_connection:
 				self.db_url_primary = self.db_url_secondary = res["result"][0]["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
 		else:
 			raise Exception('Connection error: {0}'.format(error_msg))
@@ -305,13 +306,14 @@ class Database():
 		"""
 		Try to update connection session with current authentication params.
 		"""
+		primary_url, secondary_url = self.db_url_primary, self.db_url_secondary
 
 		self.disconnect()
 
-		if self.connect_from_cerebro_client:
+		if self.is_connected_by_client:
 			self.connect_from_cerebro_client()
 		else:
-			self.connect(self.db_user, self.db_password)
+			self.connect(self.db_user, self.db_password, primary_url, secondary_url)
 
 		return self.is_connected()
 
@@ -372,11 +374,9 @@ class Database():
 					res = None
 					error_msg = "{0} : {1}".format(err["code"], err["message"])
 					if err["code"] in RECONNECT_ERROR_CODES: continue
-					elif err["message"].startswith("sqlmsg--") and err["message"].endswith("#0--"):
+					elif err["message"].startswith("sqlmsg--") and ("#0" in err["message"] or "#1" in err["message"]):
 						self.reconnect()
 						continue
-					elif err["message"].startswith("sqlmsg--") and err["message"].endswith("#1--"):
-						raise Exception(err["message"][8:-4])
 					break
 				else:
 					# Http request error occured
@@ -384,7 +384,7 @@ class Database():
 			except Exception as e:
 				error_msg = str(e)
 
-		if res is not None:	
+		if res is not None:
 			if len(res.get("result", [])) > 0:
 				for i, row in enumerate(res["result"][0]["rows"]):
 					ret.append([])
@@ -1372,6 +1372,8 @@ class Database():
 				task_url = rtask_url[0][0]
 			
 			# Importing file to the storage
+			task_url = task_url.encode('utf-8')
+			#filename = filename.encode('utf-8')
 			hash64 = carga.import_file(filename,  task_url)
 			hash = hash64_16(hash64)
 
