@@ -60,8 +60,8 @@ class Cargador(xmlrpc.ServerProxy):
 			rpc.import_file('cargador.py', 'Test Folder')) # import the file in the Cargador file storage.
 		"""
 
-		c_url = '{0}{1}/{2}'.format('' if url.startswith('/') else '/', url.rstrip('/'), string_byte(os.path.basename(file_name)))
-		host = '{0}:{1}'.format(self.host, self.http_port)
+		c_url = u'{0}{1}/{2}'.format(u'' if url.startswith('/') else u'/', url.rstrip('/'), os.path.basename(file_name))
+		host = u'{0}:{1}'.format(self.host, self.http_port)
 		content_lenght = '{0}'.format(os.stat(file_name).st_size)
 		headers = {
 			"User-Agent": "Python uploader",
@@ -74,7 +74,7 @@ class Cargador(xmlrpc.ServerProxy):
 
 		ret = None
 		with open(file_name, "rb") as fh:
-			response = requests.put('http://{0}{1}'.format(host, c_url), headers=headers, data=fh.read())
+			response = requests.put(string_byte(u'http://{0}{1}'.format(host, c_url)), headers=headers, data=fh.read())
 			if response.status_code != 201:
 				raise RuntimeError('Attachment failed with code: ' + str(response.status_code) + '. reason: ' + response.reason)
 				

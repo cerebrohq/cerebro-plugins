@@ -16,7 +16,7 @@ TYPES_FLOAT		= {'numeric', 'decimal', 'real', 'double precision', 'float4', 'flo
 TYPES_DATETIME	= {'timestamptz'}
 
 # Main connection server url
-DEFAULT_URL = 'https://cerebrohq.com/dapi/rpc.php'
+DEFAULT_URL = 'https://login.cerebrohq.com/dapi/rpc.php'
 
 # PostgreSQL error codes that require another try
 RECONNECT_ERROR_CODES = {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'}
@@ -162,6 +162,8 @@ class Database():
 		self.db_timeout = db_timeout
 		self.db_reconn_count = db_reconn_count
 		self.is_connected_by_client = False
+		self.db_user = ''
+		self.db_password = ''
 
 		self.disconnect()
 
@@ -362,28 +364,46 @@ class Database():
 		res = None
 		error_msg = ""
 		for i in range(self.db_reconn_count):
+			res = None
+			payload['id'] = self.query_id
+			self.query_id += 1
 			try:
 				response = requests.post(self.db_url_secondary if read_only else self.db_url_primary, headers=header, cookies=cookies,
 							 data=json.dumps(payload, default=json_serial), timeout=self.db_timeout)
-				self.query_id += 1
-				if response.status_code == 200:
-					res = json.loads(response.text)
-					err = res.get("error", None)
-					if err is None: break
-					# Internal server error occured
-					res = None
-					error_msg = "{0} : {1}".format(err["code"], err["message"])
-					if err["code"] in RECONNECT_ERROR_CODES: continue
-					elif err["message"].startswith("sqlmsg--") and ("#0" in err["message"] or "#1" in err["message"]):
-						self.reconnect()
-						continue
-					break
+				response.raise_for_status()
+				res = json.loads(response.text)
+			except requests.exceptions.RequestException as req_ex:
+				# Http request error occured
+				if req_ex.response is not None:
+					error_msg = "Connection error {0} : {1}".format(req_ex.response.status_code, req_ex.response.reason)
 				else:
-					# Http request error occured
-					error_msg = "Connection error {0} : {1}".format(response.status_code, response.reason)
+					error_msg = str(req_ex)
+				continue
 			except Exception as e:
+				# Python exception. Interrupt execution
 				error_msg = str(e)
-
+				break
+			
+			if res is not None:
+				err = res.get("error", None)
+				# Success
+				if err is None: break
+				# Internal server error occured
+				res = None
+				error_msg = "{0} : {1}".format(err["code"], err["message"])
+				# Reconnect if requested by server
+				if err["code"] in RECONNECT_ERROR_CODES: continue
+				elif "#0" in err["message"] or "#1" in err["message"]:
+					# Require connection using credentials
+					if self.is_connected_by_client:
+						self.disconnect()
+						raise Exception("Client connection is invalid. Reconnect using credentials. #0")
+					self.reconnect()
+					continue
+				# Interrupt execution
+				break
+		
+		# Load the result if not empty
 		if res is not None:
 			if len(res.get("result", [])) > 0:
 				for i, row in enumerate(res["result"][0]["rows"]):
@@ -401,7 +421,6 @@ class Database():
 						else:
 							ret[i].append(col)
 		else:
-			self.disconnect()
 			raise Exception(error_msg)
 
 		return ret
@@ -1372,8 +1391,6 @@ class Database():
 				task_url = rtask_url[0][0]
 			
 			# Importing file to the storage
-			task_url = task_url.encode('utf-8')
-			#filename = filename.encode('utf-8')
 			hash64 = carga.import_file(filename,  task_url)
 			hash = hash64_16(hash64)
 
@@ -1427,7 +1444,7 @@ class Database():
 				hashthumbs = list()
 				for f in thumbnails:
 					# Importing a thumbnail to the file storage
-					th_hash64 = carga.import_file(f,  'thumbnail.cache')
+					th_hash64 = carga.import_file(string_unicode(f), u'thumbnail.cache')
 					th_hash = hash64_16(th_hash64)
 					hashthumbs.append(th_hash)
 
