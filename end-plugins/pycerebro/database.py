@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import os
+import os, sys
 import re
 import socket
 import struct
@@ -9,6 +9,8 @@ from .dbtypes import *
 import collections
 import time
 import requests, json, iso8601, datetime
+
+PY3 = sys.version_info[0] == 3
 
 # PostgreSQL types
 TYPES_INT		= {'integer', 'serial', 'smallint', 'int4', 'int2', 'int8'}
@@ -39,6 +41,12 @@ def to_array(obj):
 	"""
 
 	return obj if isinstance(obj, (set, list, tuple)) else [obj]
+
+def text_unicode(text):
+	if PY3:
+		return text
+	else:
+		return string_unicode(text)
 
 class Database():
 	"""
@@ -229,7 +237,7 @@ class Database():
 					if err is None: break
 					# Internal server error occured
 					res = None
-					error_msg = "{0} : {1}".format(err["code"], err["message"])
+					error_msg = text_unicode("{0} : {1}").format(text_unicode(err["code"]), text_unicode(err["message"]))
 				else:
 					# Http request error occured
 					error_msg = "{0} : {1}".format(response.status_code, response.reason)
@@ -390,7 +398,7 @@ class Database():
 				if err is None: break
 				# Internal server error occured
 				res = None
-				error_msg = "{0} : {1}".format(err["code"], err["message"])
+				error_msg = text_unicode("{0} : {1}").format(text_unicode(err["code"]), text_unicode(err["message"]))
 				# Reconnect if requested by server
 				if err["code"] in RECONNECT_ERROR_CODES: continue
 				elif "#0" in err["message"] or "#1" in err["message"]:
