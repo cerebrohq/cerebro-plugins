@@ -307,3 +307,9 @@ def string_byte(string):
 	except:
 		pass
 	return string
+
+def error_unicode(exception):
+	if PY3:
+		return str(exception)
+	else:
+		return string_unicode(exception.message)

@@ -241,6 +241,14 @@ STATUS_DATA_PERM_ENTER	=	9
 """
 Permissions to enter status.
 """
+STATUS_DATA_MTM	=	10
+"""
+Modify time.
+"""
+STATUS_DATA_ICON_HASH	=	11
+"""
+Status icon hash, if exists.
+"""
 
 STATUS_FLAG_ = ''
 """

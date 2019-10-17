@@ -9,6 +9,7 @@ from .dbtypes import *
 import collections
 import time
 import requests, json, iso8601, datetime
+from random import shuffle
 
 PY3 = sys.version_info[0] == 3
 
@@ -18,7 +19,7 @@ TYPES_FLOAT		= {'numeric', 'decimal', 'real', 'double precision', 'float4', 'flo
 TYPES_DATETIME	= {'timestamptz'}
 
 # Main connection server url
-DEFAULT_URL = 'https://login.cerebrohq.com/dapi/rpc.php'
+DEFAULT_URL = "https://login1.cerebrohq.com;https://login2.cerebrohq.com;https://login3.cerebrohq.com;https://login4.cerebrohq.com"
 
 # PostgreSQL error codes that require another try
 RECONNECT_ERROR_CODES = {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'}
@@ -48,7 +49,11 @@ def text_unicode(text):
 	else:
 		return string_unicode(text)
 
-class Database():
+class Database(object):
+
+	__slots__ = ('db_timeout', 'db_reconn_count', 'is_connected_by_client', 'db_user', 'db_password',
+			  'sid', 'query_id', 'db_url_primary', 'db_url_secondary')
+
 	"""
 	:param string db_host: host name.
 	:param int db_port: port.
@@ -206,13 +211,6 @@ class Database():
 		self.db_user = db_user
 		self.db_password = db_password
 
-		# Check url format
-		self.db_url_primary = "{0}{1}{2}".format("" if primary_url.startswith("http") else "http://", primary_url, "" if primary_url.endswith(".php") else "/rpc.php")
-		if secondary_url is not None and len(secondary_url) != 0:
-			self.db_url_secondary = "{0}{1}{2}".format("" if secondary_url.startswith("http") else "http://", secondary_url, "" if secondary_url.endswith(".php") else "/rpc.php")
-		else:
-			self.db_url_secondary = self.db_url_primary
-
 		header = {
 			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
 			'Accept': 'application/json-rpc',
@@ -221,33 +219,53 @@ class Database():
 		payload = {
 			'method': 'sessionDirectStart' if direct_connection else 'sessionStart',
 			'jsonrpc': '2.0',
-			'params': [self.db_user, self.db_password, 0],
+			'params': [self.db_user, self.db_password, 655360],
 			'id': self.query_id
 		}
 
 		res = None
 		error_msg = ""
-		for i in range(self.db_reconn_count):
-			try:
-				response = requests.post(self.db_url_primary, headers=header, data=json.dumps(payload, default=json_serial), timeout=30)
-				self.query_id += 1
-				if response.status_code == 200:
-					res = json.loads(response.text)
-					err = res.get("error", None)
-					if err is None: break
-					# Internal server error occured
+		url_list = primary_url.split(';')
+		shuffle(url_list)
+
+		for url in url_list:
+			# Check url format
+			self.db_url_primary = "{0}{1}{2}".format("" if url.startswith("http") else "http://", url, "" if url.endswith(".php") else "/dapi/rpc.php")
+			self.db_url_secondary = self.db_url_primary
+			#if secondary_url is not None and len(secondary_url) != 0:
+			#	self.db_url_secondary = "{0}{1}{2}".format("" if secondary_url.startswith("http") else "http://", secondary_url, "" if secondary_url.endswith(".php") else "/rpc.php")
+			#else:
+			#	self.db_url_secondary = self.db_url_primary
+			
+			for i in range(self.db_reconn_count):
+				try:
+					response = requests.post(self.db_url_primary, headers=header, data=json.dumps(payload, default=json_serial), timeout=30)
+					payload['id'] = self.query_id = self.query_id + 1
+
+					if response.status_code == 200:
+						res = json.loads(response.text)
+						err = res.get("error", None)
+						# Internal server error occured
+						if err is not None:
+							error_msg = text_unicode("{0} : {1}").format(text_unicode(err["code"]), text_unicode(err["message"]))
+							res = None
+							continue
+						# Received normal response from server
+						if len(res.get("result", [])) == 0:
+							raise Exception('Login/password is invalid')
+						break
+					else:
+						# Http request error occured
+						error_msg = "{0} : {1}".format(response.status_code, response.reason)
+				except Exception as err:
+					error_msg = error_unicode(err)
 					res = None
-					error_msg = text_unicode("{0} : {1}").format(text_unicode(err["code"]), text_unicode(err["message"]))
-				else:
-					# Http request error occured
-					error_msg = "{0} : {1}".format(response.status_code, response.reason)
-			except:
-				pass
 
-		if res is not None:
-			if len(res.get("result", [])) == 0:
-				raise Exception('Login is invalid')
+			# Check result
+			if res is not None:
+				break
 
+		if res is not None and len(res.get("result", [])) > 0:
 			self.sid = int(res["result"][0]["token"])
 			if not direct_connection:
 				self.db_url_primary = self.db_url_secondary = res["result"][0]["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
@@ -667,7 +685,7 @@ class Database():
 		as well as the presence / lack of sub-tasks in the task.
 		"""
 
-		return self.z_execute(True, 'select * from "statusListByTask"(?)',  task_id)
+		return self.z_execute(True, 'select * from "statusListByTask_01"(?)',  task_id)
 
 	def message(self,  message_id):
 		"""
@@ -756,7 +774,7 @@ class Database():
 
 		The table fields are described in the module dbtypes: :py:const:`STATUS_DATA_...<py_cerebro.dbtypes.STATUS_DATA_>`		
 		"""
-		return self.z_execute(True, 'select * from "statusList"()')
+		return self.z_execute(True, 'select * from "statusList_01"()')
 
 	def add_task(self,  parent_id,  name,  activity_id = 0):
 		"""
