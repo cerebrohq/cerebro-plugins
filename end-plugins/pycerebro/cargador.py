@@ -20,6 +20,9 @@ from .cclib import string_byte
 
 
 class Cargador(xmlrpc.ServerProxy): 
+
+	__slots__ = ('host', 'http_port', 'http_proxy')
+
 	"""
 	Cargador class to access the Cargador file storage.
 	
@@ -40,11 +43,18 @@ class Cargador(xmlrpc.ServerProxy):
 	More information about these methods, see the section:ref:`capi-xml-rpc`.
 	"""	
 	
-	def __init__(self, _host, _rpc_port, _http_port):
+	def __init__(self, _host, _rpc_port, _http_port, _http_proxy = ''):
 		
 		xmlrpc.ServerProxy.__init__(self, 'http://{0}:{1}'.format(_host, _rpc_port))
 		self.host = _host
 		self.http_port = _http_port
+		self.set_proxy(_http_proxy)
+
+	def set_proxy(self, _http_proxy):
+		if _http_proxy is not None and len(_http_proxy) > 0:
+			self.http_proxy = _http_proxy if _http_proxy.startswith('http') else 'http://' + _http_proxy
+		else:
+			self.http_proxy = ''
 
 	def import_file(self, file_name, url):
 		"""
@@ -74,7 +84,11 @@ class Cargador(xmlrpc.ServerProxy):
 
 		ret = None
 		with open(file_name, "rb") as fh:
-			response = requests.put(string_byte(u'http://{0}{1}'.format(host, c_url)), headers=headers, data=fh.read())
+			response = requests.put(string_byte(u'http://{0}{1}'.format(host, c_url))
+									, headers=headers
+									, proxies = {'http': self.http_proxy} if len(self.http_proxy) else {}
+									, data=fh.read()
+									)
 			if response.status_code != 201:
 				raise RuntimeError('Attachment failed with code: ' + str(response.status_code) + '. reason: ' + response.reason)
 				
@@ -100,7 +114,11 @@ class Cargador(xmlrpc.ServerProxy):
 			"accept-encoding": "gzip, deflate",
 		}
 
-		response = requests.get('http://{0}/file?hash={1}'.format(host, hash), headers=headers, stream=True)
+		response = requests.get('http://{0}/file?hash={1}'.format(host, hash)
+								, headers=headers
+								, proxies = {'http': self.http_proxy} if len(self.http_proxy) else {}
+								, stream=True
+								)
 		if response.status_code == 200:
 			with open(file_name, 'wb') as fh:
 				for chunk in response.iter_content(1024):

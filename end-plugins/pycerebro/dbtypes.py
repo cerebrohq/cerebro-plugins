@@ -249,6 +249,10 @@ STATUS_DATA_ICON_HASH	=	11
 """
 Status icon hash, if exists.
 """
+STATUS_DATA_ICON_DATA	=	12
+"""
+Status icon data. SVG format or base64-encoded PNG. Has MIME-header
+"""
 
 STATUS_FLAG_ = ''
 """

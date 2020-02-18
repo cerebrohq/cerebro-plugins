@@ -51,8 +51,8 @@ def text_unicode(text):
 
 class Database(object):
 
-	__slots__ = ('db_timeout', 'db_reconn_count', 'is_connected_by_client', 'db_user', 'db_password',
-			  'sid', 'query_id', 'db_url_primary', 'db_url_secondary')
+	__slots__ = ('__db_timeout', '__db_reconn_count', '__is_connected_by_client', '__db_user', '__db_password',
+			  '__sid', '__query_id', '__db_url_primary', '__db_url_secondary', '__db_url_proxy', '__session')
 
 	"""
 	:param string db_host: host name.
@@ -160,16 +160,12 @@ class Database(object):
 
 	def __init__(self, db_host = '', db_port = None, db_timeout = 10, db_reconn_count = 3):
 		"""
-		:param string db_host: host name.
-		:param int db_port: port.
+		:param string db_host: host name.		[ OBSOLETE ]
+		:param int db_port: port.				[ OBSOLETE ]
 		:param int db_timeout: disconnect timeout (seconds).
 		:param int db_reconn_count: reconnect counts.
 
 		Constructor.
-
-		Example::
-
-			db = database.Database('cerebrohq.com', 45432)
 		"""
 
 		self.db_timeout = db_timeout
@@ -177,27 +173,162 @@ class Database(object):
 		self.is_connected_by_client = False
 		self.db_user = ''
 		self.db_password = ''
+		self.__session = None
 
 		self.disconnect()
+
+	@property
+	def db_timeout(self):
+		return self.__db_timeout
+
+	@db_timeout.setter
+	def db_timeout(self, value):
+		self.__db_timeout = int(value) if value is not None else 10
+
+	@property
+	def db_reconn_count(self):
+		return self.__db_reconn_count
+
+	@db_reconn_count.setter
+	def db_reconn_count(self, value):
+		value = int(value) if value is not None else 3
+		self.__db_reconn_count = value
+
+	@property
+	def is_connected_by_client(self):
+		return self.__is_connected_by_client
+
+	@is_connected_by_client.setter
+	def is_connected_by_client(self, value):
+		self.__is_connected_by_client = True if value else False
+
+	@property
+	def db_user(self):
+		return self.__db_user
+
+	@db_user.setter
+	def db_user(self, value):
+		self.__db_user = value if value is not None else ''
+
+	@property
+	def db_password(self):
+		return self.__db_password
+
+	@db_password.setter
+	def db_password(self, value):
+		self.__db_password = value if value is not None else ''
+
+	@property
+	def token(self):
+		return self.__sid
+
+	@token.setter
+	def token(self, value):
+		self.__sid = int(value) if value is not None else -1
+
+	@property
+	def connected(self):
+		return self.__sid != -1
+
+	@property
+	def query_id(self):
+		return self.__query_id
+
+	@query_id.setter
+	def query_id(self, value):
+		self.__query_id = int(value) if value is not None else -1
+
+	@property
+	def query_id_next(self):
+		self.__query_id += 1
+		return self.__query_id
+
+	@property
+	def db_url_primary(self):
+		return self.__db_url_primary
+
+	@db_url_primary.setter
+	def db_url_primary(self, value):
+		if value is not None and len(value) > 0:
+			self.__db_url_primary = "{0}{1}{2}".format("" if value.startswith("http") else "http://", value, "" if value.endswith(".php") else "/dapi/rpc.php")
+		else:
+			self.__db_url_primary = ''
+
+	@property
+	def db_url_secondary(self):
+		return self.__db_url_secondary if self.__db_url_secondary is not None and len(self.__db_url_secondary) > 0 else self.__db_url_primary
+
+	@db_url_secondary.setter
+	def db_url_secondary(self, value):
+		if value is not None and len(value) > 0:
+			self.__db_url_secondary = "{0}{1}{2}".format("" if value.startswith("http") else "http://", value, "" if value.endswith(".php") else "/dapi/rpc.php")
+		else:
+			self.__db_url_secondary = ''
+
+	@property
+	def proxy(self):
+		return self.__db_url_proxy
+
+	@proxy.setter
+	def proxy(self, value):
+		self.__db_url_proxy = value.replace('http://', '').replace('https://', '') if value is not None else ''
+
+	@property
+	def proxy_list(self):
+		if len(self.__db_url_proxy) > 0:
+			return {'http': 'http://' + self.__db_url_proxy, 'https': 'https://' + self.__db_url_proxy}
+		return {}
+
+	@property
+	def session(self):
+		if self.__session is None:
+			self.__session = requests.Session()
+
+		self.__session.headers.update({
+			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+			'Accept': 'application/json-rpc',
+			'Cache-Control': 'no-store'
+		})
+		self.__session.cookies.update({
+			'token': str(self.token)
+		})
+		self.__session.proxies.update(self.proxy_list)
+		self.__session.timeout = self.db_timeout
+
+		return self.__session
+
+	@session.setter
+	def session(self, value):
+		if self.__session is not None:
+			self.__session.close()
+		self.__session = None
 
 	def is_connected(self):
 		"""
 		Returns True if current connection is active.
 		"""
 
-		return self.sid != -1
+		return self.connected
 
 	def disconnect(self):
 		"""
 		Force drop current connection settings.
 		"""
 
-		self.sid = -1
+		self.token = -1
 		self.query_id = 1
 		self.db_url_primary = ''
 		self.db_url_secondary = ''
+		self.proxy = ''
+		self.session = None
+
+	def set_proxy(self, proxy_host):
+		"""
+		Set proxy address for all queries
+		"""
+		self.proxy = proxy_host
 		
-	def connect(self, db_user, db_password, primary_url='', secondary_url=''):
+	def connect(self, db_user, db_password, primary_url='', secondary_url='', proxy=''):
 		"""
 		Connection and authentification.
 		"""
@@ -210,7 +341,8 @@ class Database(object):
 		self.is_connected_by_client = False
 		self.db_user = db_user
 		self.db_password = db_password
-
+		self.proxy = proxy
+		
 		header = {
 			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
 			'Accept': 'application/json-rpc',
@@ -229,9 +361,7 @@ class Database(object):
 		shuffle(url_list)
 
 		for url in url_list:
-			# Check url format
-			self.db_url_primary = "{0}{1}{2}".format("" if url.startswith("http") else "http://", url, "" if url.endswith(".php") else "/dapi/rpc.php")
-			self.db_url_secondary = self.db_url_primary
+			self.db_url_primary = url
 			#if secondary_url is not None and len(secondary_url) != 0:
 			#	self.db_url_secondary = "{0}{1}{2}".format("" if secondary_url.startswith("http") else "http://", secondary_url, "" if secondary_url.endswith(".php") else "/rpc.php")
 			#else:
@@ -239,8 +369,13 @@ class Database(object):
 			
 			for i in range(self.db_reconn_count):
 				try:
-					response = requests.post(self.db_url_primary, headers=header, data=json.dumps(payload, default=json_serial), timeout=30)
-					payload['id'] = self.query_id = self.query_id + 1
+					response = requests.post(self.db_url_primary
+											, headers = header
+											, data = json.dumps(payload, default=json_serial)
+											, timeout = 30
+											, proxies = self.proxy_list
+											)
+					payload['id'] = self.query_id_next
 
 					if response.status_code == 200:
 						res = json.loads(response.text)
@@ -266,9 +401,9 @@ class Database(object):
 				break
 
 		if res is not None and len(res.get("result", [])) > 0:
-			self.sid = int(res["result"][0]["token"])
+			self.token = int(res["result"][0]["token"])
 			if not direct_connection:
-				self.db_url_primary = self.db_url_secondary = res["result"][0]["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
+				self.db_url_primary = res["result"][0]["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
 		else:
 			raise Exception('Connection error: {0}'.format(error_msg))
 
@@ -317,11 +452,12 @@ class Database(object):
 				if session_id == 0:
 					status = 1
 				else:
-					status = 0
 					urls = json.loads(string_unicode(res[4].strip(b'\x00')))
-					self.sid = session_id # устанавливаем идентификатор авторизованного пользователя.
+					self.token = session_id
 					self.db_url_primary = urls["primary"]
 					self.db_url_secondary = urls["secondary"]
+					self.proxy = urls.get("proxy", '')
+					status = 0
 					
 			conn.close()
 			
@@ -334,14 +470,14 @@ class Database(object):
 		"""
 		Try to update connection session with current authentication params.
 		"""
-		primary_url, secondary_url = self.db_url_primary, self.db_url_secondary
+		primary_url, secondary_url, proxy = self.db_url_primary, self.db_url_secondary, self.proxy
 
 		self.disconnect()
 
 		if self.is_connected_by_client:
 			self.connect_from_cerebro_client()
 		else:
-			self.connect(self.db_user, self.db_password, primary_url, secondary_url)
+			self.connect(self.db_user, self.db_password, primary_url, secondary_url, proxy)
 
 		return self.is_connected()
 
@@ -372,30 +508,20 @@ class Database(object):
 		args = [query.replace('%s', '?')]
 		args.extend(parameters)
 
-		header = {
-			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-			'Accept': 'application/json-rpc',
-			'Cache-Control': 'no-store'
-		}
 		payload = {
 			'method': 'queryMulti',
 			'jsonrpc': '2.0',
 			'params': args,
 			'id': self.query_id
 		}
-		cookies = {
-			'token': str(self.sid)
-		}
 
 		res = None
 		error_msg = ""
 		for i in range(self.db_reconn_count):
 			res = None
-			payload['id'] = self.query_id
-			self.query_id += 1
+			payload['id'] = self.query_id_next
 			try:
-				response = requests.post(self.db_url_secondary if read_only else self.db_url_primary, headers=header, cookies=cookies,
-							 data=json.dumps(payload, default=json_serial), timeout=self.db_timeout)
+				response = self.session.post(self.db_url_secondary if read_only else self.db_url_primary, data = json.dumps(payload, default=json_serial))
 				response.raise_for_status()
 				res = json.loads(response.text)
 			except requests.exceptions.RequestException as req_ex:
@@ -419,7 +545,7 @@ class Database(object):
 				error_msg = text_unicode("{0} : {1}").format(text_unicode(err["code"]), text_unicode(err["message"]))
 				# Reconnect if requested by server
 				if err["code"] in RECONNECT_ERROR_CODES: continue
-				elif "#0" in err["message"] or "#1" in err["message"]:
+				elif ("#0" in err["message"] or "#1" in err["message"]) and re.search(r"#[01](?:\D|$)", err["message"]):
 					# Require connection using credentials
 					if self.is_connected_by_client:
 						self.disconnect()
