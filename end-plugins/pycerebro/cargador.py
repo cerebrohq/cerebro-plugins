@@ -16,7 +16,8 @@ except:
 	import xmlrpclib as xmlrpc
 
 import os, requests
-from .cclib import string_byte
+from requests.utils import requote_uri
+from .cclib import string_byte, PY3
 
 
 class Cargador(xmlrpc.ServerProxy): 
@@ -72,6 +73,10 @@ class Cargador(xmlrpc.ServerProxy):
 
 		c_url = u'{0}{1}/{2}'.format(u'' if url.startswith('/') else u'/', url.rstrip('/'), os.path.basename(file_name))
 		host = u'{0}:{1}'.format(self.host, self.http_port)
+
+		full_url = u'http://{0}{1}'.format(host, c_url)
+		if not PY3: full_url = string_byte(full_url)
+
 		content_lenght = '{0}'.format(os.stat(file_name).st_size)
 		headers = {
 			"User-Agent": "Python uploader",
@@ -84,14 +89,14 @@ class Cargador(xmlrpc.ServerProxy):
 
 		ret = None
 		with open(file_name, "rb") as fh:
-			response = requests.put(string_byte(u'http://{0}{1}'.format(host, c_url))
+			response = requests.put(requote_uri(full_url)
 									, headers=headers
 									, proxies = {'http': self.http_proxy} if len(self.http_proxy) else {}
 									, data=fh.read()
 									)
 			if response.status_code != 201:
 				raise RuntimeError('Attachment failed with code: ' + str(response.status_code) + '. reason: ' + response.reason)
-				
+			
 			ret = response.content.decode('ascii').strip()
 		
 		return ret
@@ -113,8 +118,9 @@ class Cargador(xmlrpc.ServerProxy):
 			"host": host,
 			"accept-encoding": "gzip, deflate",
 		}
+		full_url = "http://{0}/file?hash={1}".format(host, hash)
 
-		response = requests.get('http://{0}/file?hash={1}'.format(host, hash)
+		response = requests.get(requote_uri(full_url)
 								, headers=headers
 								, proxies = {'http': self.http_proxy} if len(self.http_proxy) else {}
 								, stream=True

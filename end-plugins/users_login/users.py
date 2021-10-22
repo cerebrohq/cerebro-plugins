@@ -1,11 +1,8 @@
-from py_cerebro import cclib, database
+from pycerebro import cclib, database
 import datetime
 
-host = 'db.cerebrohq.com'
-port = 45432
-
 def main():
-	db = database.Database(host, port)
+	db = database.Database()
 
 	if (db.connect_from_cerebro_client() == 0):
 		res = db.execute('select mtm, name from "listUsers"(false)')

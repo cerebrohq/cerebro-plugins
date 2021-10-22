@@ -14,15 +14,18 @@ from random import shuffle
 PY3 = sys.version_info[0] == 3
 
 # PostgreSQL types
-TYPES_INT		= {'integer', 'serial', 'smallint', 'int4', 'int2', 'int8'}
-TYPES_FLOAT		= {'numeric', 'decimal', 'real', 'double precision', 'float4', 'float8'}
-TYPES_DATETIME	= {'timestamptz'}
+TYPES_INT		= {"integer", "serial", "smallint", "int4", "int2", "int8"}
+TYPES_FLOAT		= {"numeric", "decimal", "real", "double precision", "float4", "float8"}
+TYPES_DATETIME	= {"timestamptz"}
 
 # Main connection server url
 DEFAULT_URL = "https://login1.cerebrohq.com;https://login2.cerebrohq.com;https://login3.cerebrohq.com;https://login4.cerebrohq.com"
 
 # PostgreSQL error codes that require another try
-RECONNECT_ERROR_CODES = {'08000', '08003', '08006', '08001', '08004', '08007', '08P01'}
+RECONNECT_ERROR_CODES = {"08000", "08003", "08006", "08001", "08004", "08007", "08P01"}
+
+# RegExps
+RE_TASK_NAME = r"[\\\/\"':\?|*<>]+"		# r"[\\\\/#:?&'\",|+]+"
 
 def json_serial(obj):
 	"""
@@ -34,7 +37,7 @@ def json_serial(obj):
 	elif isinstance(obj, set):
 		return list(obj)
 
-	raise TypeError("Type %s is not JSON serializable" % type(obj))
+	raise TypeError("Type %s is not JSON serializable".format(type(obj)))
 
 def to_array(obj):
 	"""
@@ -51,8 +54,8 @@ def text_unicode(text):
 
 class Database(object):
 
-	__slots__ = ('__db_timeout', '__db_reconn_count', '__is_connected_by_client', '__db_user', '__db_password',
-			  '__sid', '__query_id', '__db_url_primary', '__db_url_secondary', '__db_url_proxy', '__session')
+	__slots__ = ("__db_timeout", "__db_reconn_count", "__is_connected_by_client", "__db_user", "__db_password",
+			  "__sid", "__query_id", "__db_url_primary", "__db_url_secondary", "__db_url_proxy", "__session", "__server_list")
 
 	"""
 	:param string db_host: host name.
@@ -158,7 +161,7 @@ class Database(object):
 	* :py:meth:`users()                          <py_cerebro.database.Database.users>`
 	"""
 
-	def __init__(self, db_host = '', db_port = None, db_timeout = 10, db_reconn_count = 3):
+	def __init__(self, db_host = "", db_port = None, db_timeout = 10, db_reconn_count = 2):
 		"""
 		:param string db_host: host name.		[ OBSOLETE ]
 		:param int db_port: port.				[ OBSOLETE ]
@@ -171,9 +174,10 @@ class Database(object):
 		self.db_timeout = db_timeout
 		self.db_reconn_count = db_reconn_count
 		self.is_connected_by_client = False
-		self.db_user = ''
-		self.db_password = ''
+		self.db_user = ""
+		self.db_password = ""
 		self.__session = None
+		self.__server_list = []
 
 		self.disconnect()
 
@@ -191,7 +195,7 @@ class Database(object):
 
 	@db_reconn_count.setter
 	def db_reconn_count(self, value):
-		value = int(value) if value is not None else 3
+		value = int(value) if value is not None and value >= 0 else 2
 		self.__db_reconn_count = value
 
 	@property
@@ -208,7 +212,7 @@ class Database(object):
 
 	@db_user.setter
 	def db_user(self, value):
-		self.__db_user = value if value is not None else ''
+		self.__db_user = value if value is not None else ""
 
 	@property
 	def db_password(self):
@@ -216,7 +220,7 @@ class Database(object):
 
 	@db_password.setter
 	def db_password(self, value):
-		self.__db_password = value if value is not None else ''
+		self.__db_password = value if value is not None else ""
 
 	@property
 	def token(self):
@@ -252,7 +256,7 @@ class Database(object):
 		if value is not None and len(value) > 0:
 			self.__db_url_primary = "{0}{1}{2}".format("" if value.startswith("http") else "http://", value, "" if value.endswith(".php") else "/dapi/rpc.php")
 		else:
-			self.__db_url_primary = ''
+			self.__db_url_primary = ""
 
 	@property
 	def db_url_secondary(self):
@@ -263,7 +267,7 @@ class Database(object):
 		if value is not None and len(value) > 0:
 			self.__db_url_secondary = "{0}{1}{2}".format("" if value.startswith("http") else "http://", value, "" if value.endswith(".php") else "/dapi/rpc.php")
 		else:
-			self.__db_url_secondary = ''
+			self.__db_url_secondary = ""
 
 	@property
 	def proxy(self):
@@ -271,12 +275,12 @@ class Database(object):
 
 	@proxy.setter
 	def proxy(self, value):
-		self.__db_url_proxy = value.replace('http://', '').replace('https://', '') if value is not None else ''
+		self.__db_url_proxy = value.replace("http://", "").replace("https://", "") if value is not None else ""
 
 	@property
 	def proxy_list(self):
 		if len(self.__db_url_proxy) > 0:
-			return {'http': 'http://' + self.__db_url_proxy, 'https': 'https://' + self.__db_url_proxy}
+			return {"http": "http://" + self.__db_url_proxy, "https": "https://" + self.__db_url_proxy}
 		return {}
 
 	@property
@@ -285,12 +289,12 @@ class Database(object):
 			self.__session = requests.Session()
 
 		self.__session.headers.update({
-			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-			'Accept': 'application/json-rpc',
-			'Cache-Control': 'no-store'
+			"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+			"Accept": "application/json-rpc",
+			"Cache-Control": "no-store"
 		})
 		self.__session.cookies.update({
-			'token': str(self.token)
+			"token": str(self.token)
 		})
 		self.__session.proxies.update(self.proxy_list)
 		self.__session.timeout = self.db_timeout
@@ -302,6 +306,10 @@ class Database(object):
 		if self.__session is not None:
 			self.__session.close()
 		self.__session = None
+
+	@property
+	def server_list(self):
+		return self.__server_list
 
 	def is_connected(self):
 		"""
@@ -317,18 +325,30 @@ class Database(object):
 
 		self.token = -1
 		self.query_id = 1
-		self.db_url_primary = ''
-		self.db_url_secondary = ''
-		self.proxy = ''
+		self.db_url_primary = ""
+		self.db_url_secondary = ""
+		self.proxy = ""
 		self.session = None
+		self.__server_list = []
 
 	def set_proxy(self, proxy_host):
 		"""
 		Set proxy address for all queries
 		"""
 		self.proxy = proxy_host
+
+	def set_server(self, server_index):
+		"""
+		Set active server by index from server_list
+		"""
+
+		if isinstance(server_index, int) and server_index >= 0 and server_index < len(self.__server_list):
+			self.token = self.__server_list[server_index]["token"]
+			self.db_url_primary = self.__server_list[server_index]["addr_jrpc"]
+		else:
+			raise Exception("Invalid server index provided to database.set_server(): {}".format(server_index))
 		
-	def connect(self, db_user, db_password, primary_url='', secondary_url='', proxy=''):
+	def connect(self, db_user, db_password, primary_url="", secondary_url="", proxy=""):
 		"""
 		Connection and authentification.
 		"""
@@ -342,17 +362,18 @@ class Database(object):
 		self.db_user = db_user
 		self.db_password = db_password
 		self.proxy = proxy
+		self.__server_list = []
 		
 		header = {
-			'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-			'Accept': 'application/json-rpc',
-			'Cache-Control': 'no-store'
+			"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+			"Accept": "application/json-rpc",
+			"Cache-Control": "no-store"
 		}
 		payload = {
-			'method': 'sessionDirectStart' if direct_connection else 'sessionStart',
-			'jsonrpc': '2.0',
-			'params': [self.db_user, self.db_password, 655360],
-			'id': self.query_id
+			"method": "sessionDirectStart" if direct_connection else "sessionStart",
+			"jsonrpc": "2.0",
+			"params": [self.db_user, self.db_password, 655360],
+			"id": self.query_id
 		}
 
 		res = None
@@ -367,7 +388,7 @@ class Database(object):
 			#else:
 			#	self.db_url_secondary = self.db_url_primary
 			
-			for i in range(self.db_reconn_count):
+			for i in range(self.db_reconn_count + 1):
 				try:
 					response = requests.post(self.db_url_primary
 											, headers = header
@@ -375,7 +396,7 @@ class Database(object):
 											, timeout = 30
 											, proxies = self.proxy_list
 											)
-					payload['id'] = self.query_id_next
+					payload["id"] = self.query_id_next
 
 					if response.status_code == 200:
 						res = json.loads(response.text)
@@ -387,7 +408,7 @@ class Database(object):
 							continue
 						# Received normal response from server
 						if len(res.get("result", [])) == 0:
-							raise Exception('Login/password is invalid')
+							raise Exception("Login/password is invalid")
 						break
 					else:
 						# Http request error occured
@@ -401,11 +422,23 @@ class Database(object):
 				break
 
 		if res is not None and len(res.get("result", [])) > 0:
-			self.token = int(res["result"][0]["token"])
 			if not direct_connection:
-				self.db_url_primary = res["result"][0]["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
+				for conn_info in res["result"]:
+					self.__server_list.append({
+						"name": conn_info["name"]
+						, "addr_jrpc": conn_info["server"]["primary_server"]["addr_jrpc"] + u"/rpc.php"
+						, "token": int(conn_info["token"])
+					})
+			else:
+				self.__server_list.append({
+					"name": "Direct connection"
+					, "addr_jrpc": self.db_url_primary
+					, "token": int(res["result"][0]["token"])
+				})
+
+			self.set_server(0)
 		else:
-			raise Exception('Connection error: {0}'.format(error_msg))
+			raise Exception("Connection error: {0}".format(error_msg))
 
 	def connect_from_cerebro_client(self):
 		"""
@@ -435,28 +468,28 @@ class Database(object):
 		self.is_connected_by_client = True
 		try:
 			cerebro_port = 51051
-			conn = socket.create_connection(('127.0.0.1',  cerebro_port),)
+			conn = socket.create_connection(("127.0.0.1",  cerebro_port),)
 
 			proto_version = 3
 			packet_type = 6
 
-			msg = struct.pack('II',  proto_version,  packet_type)
-			header = struct.pack('II', 0xEEEEFF01, len(msg))
+			msg = struct.pack("II",  proto_version,  packet_type)
+			header = struct.pack("II", 0xEEEEFF01, len(msg))
 
 			conn.send(header+msg)
 			data = conn.recv(1024)
 
-			res = struct.unpack_from('IIQI{0}s'.format(len(data) - 20),  data, 0)
+			res = struct.unpack_from("IIQI{0}s".format(len(data) - 20),  data, 0)
 			if res[0] == 0xEEEEFF01:
 				session_id = res[2]
 				if session_id == 0:
 					status = 1
 				else:
-					urls = json.loads(string_unicode(res[4].strip(b'\x00')))
+					urls = json.loads(string_unicode(res[4].strip(b"\x00")))
 					self.token = session_id
 					self.db_url_primary = urls["primary"]
 					self.db_url_secondary = urls["secondary"]
-					self.proxy = urls.get("proxy", '')
+					self.proxy = urls.get("proxy", "")
 					status = 0
 					
 			conn.close()
@@ -503,30 +536,30 @@ class Database(object):
 		ret = []
 
 		if not self.is_connected() and not self.reconnect():
-			raise Exception('Connection error: Reconnect attempt failed')
+			raise Exception("Connection error: Reconnect attempt failed")
 
 		args = [query.replace('%s', '?')]
 		args.extend(parameters)
 
 		payload = {
-			'method': 'queryMulti',
-			'jsonrpc': '2.0',
-			'params': args,
-			'id': self.query_id
+			"method": "queryMulti",
+			"jsonrpc": "2.0",
+			"params": args,
+			"id": self.query_id
 		}
 
 		res = None
 		error_msg = ""
-		for i in range(self.db_reconn_count):
+		for i in range(self.db_reconn_count + 1):
 			res = None
-			payload['id'] = self.query_id_next
+			payload["id"] = self.query_id_next
 			try:
 				response = self.session.post(self.db_url_secondary if read_only else self.db_url_primary, data = json.dumps(payload, default=json_serial))
 				response.raise_for_status()
 				res = json.loads(response.text)
 			except requests.exceptions.RequestException as req_ex:
 				# Http request error occured
-				if req_ex.response is not None:
+				if hasattr(req_ex, 'response') and req_ex.response is not None:
 					error_msg = "Connection error {0} : {1}".format(req_ex.response.status_code, req_ex.response.reason)
 				else:
 					error_msg = str(req_ex)
@@ -693,8 +726,9 @@ class Database(object):
 		names = []
 
 		for task_list_id, task_list_name in tasks_list:
+			if re.search(RE_TASK_NAME, task_list_name): raise Exception("Name is incorrect. Symbols \\ / # : ? & ' \" , + | are not allowed")
 			tids.append(task_list_id)
-			names.append(task_list_name)
+			names.append(task_list_name.strip())
 		tasks = self.z_execute(True, 'select "dupVTask"(?,?,?,?)',  tids, names, task_id, flags)
 		
 		ids = set()
@@ -916,11 +950,9 @@ class Database(object):
 			:py:meth:`the "Defenition" type message <py_cerebro.database.Database.add_definition>` in the task.
 		"""
 		
-		match = re.search(r"[\\\\/#:?&'\",|+]+", name)
-		if match:
-			raise Exception("Name is incorrect. Symbols \\ / # : ? & ' \" , + | are not allowed")
+		if re.search(RE_TASK_NAME, name): raise Exception("Name is incorrect. Symbols \\ / # : ? & ' \" , + | are not allowed")
 			
-		return self.z_execute(False, 'select "newTask_00"(?,?,?,true)',  parent_id,  name,  activity_id)[0][0]
+		return self.z_execute(False, 'select "newTask_00"(?,?,?,true)',  parent_id,  name.strip(),  activity_id)[0][0]
 
 	def task_set_name(self,  task_id,  name):
 		"""
@@ -931,11 +963,9 @@ class Database(object):
 		It cannot contain the following symbols: **\\\\ / # : ? & ' " , + |**.
 		"""
 		
-		match = re.search(r"[\\\\/#:?&'\",|+]+", name)
-		if match:
-			raise Exception("Name is incorrect. Symbols \\ / # : ? & ' \" , + | are not allowed")
+		if re.search(RE_TASK_NAME, name): raise Exception("Name is incorrect. Symbols \\ / # : ? & ' \" , + | are not allowed")
 			
-		return self.z_execute(False, 'select "taskSetName"(?,?)',  task_id,  name)[0][0]
+		return self.z_execute(False, 'select "taskSetName"(?,?)',  task_id,  name.strip())[0][0]
 
 	def task_set_activity(self,  task_id,  activity_id):
 		"""
@@ -1455,7 +1485,7 @@ class Database(object):
 
 		return self.z_execute(False, 'select "eventNew"(?,?,?,?,?,?)',  None,  task_id,  html_text, MESSAGE_TYPE_NOTE,  message_id,  None)[0][0]
 
-	def add_attachment(self,  message_id,  carga,  filename,  thumbnails,  description,  as_link, path = ''):
+	def add_attachment(self,  message_id,  carga,  filename,  thumbnails,  description,  as_link,  path = '',  flags = 0):
 		"""
 		:param int message_id: message ID.
 		:param py_cerebro.cargador.Cargador carga: object of class :py:class:`cargador.Cargador<py_cerebro.cargador.Cargador>`, to import files to a file storage.
@@ -1578,8 +1608,8 @@ class Database(object):
 		new_attach_id = rnew_attach_id[0][0]
 
 		# Adding the entry
-		self.z_execute(False, 'select "newAtachment_00_"(?::bigint, ?::integer, ?, ?::integer, ?::bigint, ?, ?)',
-				message_id, new_attach_id, hash, tag, file_size, file_name, description)
+		self.z_execute(False, 'select "attachNew_01"(?::bigint, ?::integer, ?, ?::integer, ?::bigint, ?, ?, ?::integer)',
+				message_id, new_attach_id, hash, tag, file_size, file_name, description, flags)
 		
 		"""
 		The added file may have several entries, e.g., it may have thumbnails or reviews.
