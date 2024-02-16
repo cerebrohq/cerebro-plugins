@@ -26,21 +26,24 @@ def create_menu():
 
 def show_dialog():
 	# A 'Qt Dialog' main menu item activation.
-	# Displays a dialog. The main interface is blocked at the moment.		
-	from PyQt5 import QtWidgets,  QtCore
+	# Displays a dialog. The main interface is blocked at the moment.
+	try:
+		from qtpy import QtWidgets, QtCore
+	except ImportError:
+		from PyQt5 import QtWidgets, QtCore
 	
 	class MyDialog(QtWidgets.QDialog): # dialog class
 
 		def __init__(self, parent=None):
 			super(MyDialog, self).__init__(parent)
 			
-			label = QtWidgets.QLabel('Qt dialog')				
-			label.setAlignment(QtCore.Qt.AlignCenter)			
+			label = QtWidgets.QLabel('Qt dialog')
+			label.setAlignment(QtCore.Qt.AlignCenter)
 			
 			mainLayout = QtWidgets.QGridLayout()
 			mainLayout.addWidget(label, 0, 0)
 			
-			self.setLayout(mainLayout)		
+			self.setLayout(mainLayout)
 	
 	
 	dialog = MyDialog()
@@ -52,10 +55,13 @@ window = None
 
 def show_window():
 	# A 'Qt Window' main menu item activation.
-	# The window doesn't cause the main interface to block.		
-	from PyQt5 import QtWidgets,  QtCore
+	# The window doesn't cause the main interface to block.
+	try:
+		from qtpy import QtWidgets, QtCore
+	except ImportError:
+		from PyQt5 import QtWidgets, QtCore
 	
-	global window	
+	global window
 	
 	if window == None: # if a window object is not created yet, creating it
 		window = QtWidgets.QLabel()

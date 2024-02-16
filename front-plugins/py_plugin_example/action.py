@@ -42,9 +42,15 @@ from :ref:`menu module <capi-templates>`.
 
 """
 
-import cerebro
+
+import sys
 import py_plugin_example.examples
 
 def init_actions():
+	if sys.stdout: sys.stdout.reconfigure(encoding='utf-8')
+	if sys.stdin: sys.stdin.reconfigure(encoding='utf-8')
+	if sys.stderr: sys.stderr.reconfigure(encoding='utf-8')
+	
 	py_plugin_example.examples.action.main()
+	py_plugin_example.examples.pyqt.create_menu()
 	pass

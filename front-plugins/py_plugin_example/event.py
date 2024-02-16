@@ -49,5 +49,5 @@ def after_event(event):
 	
 
 def error_event(error, event):
-	plugin_example.examples.event.error_event(error, event)
+	py_plugin_example.examples.event.error_event(error, event)
 	pass
